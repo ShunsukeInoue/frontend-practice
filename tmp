@@ -1,15 +1,7 @@
-import json
-import math
+import json, math
 
 def to_obj(x):
-    """Difyで来るHTTPレスポンスが str(JSON) でも dict でも受けられるようにする"""
-    if isinstance(x, dict):
-        return x
-    if isinstance(x, str):
-        x = x.strip()
-        # たまに前後に余計な文字が付くことがあるので最低限ガード
-        return json.loads(x)
-    raise TypeError(f"Unsupported type: {type(x)}")
+    return x if isinstance(x, dict) else json.loads(x)
 
 def mean(xs):
     xs = [v for v in xs if isinstance(v, (int, float))]
@@ -19,43 +11,34 @@ def extract_avg_logprob(resp: dict) -> float:
     choice = resp.get("choices", [{}])[0]
     lp = choice.get("logprobs") or {}
 
-    # よくある形式: {"content":[{"token":"...", "logprob": -0.1}, ...]}
     if isinstance(lp, dict) and isinstance(lp.get("content"), list):
         vals = [t.get("logprob") for t in lp["content"] if isinstance(t, dict)]
         v = mean(vals)
         if v is not None:
             return v
 
-    # 形式ゆれ吸収（あれば拾う）
-    for key in ["token_logprobs", "logprobs", "tokenLogprobs"]:
-        if isinstance(lp, dict) and isinstance(lp.get(key), list):
-            v = mean(lp[key])
-            if v is not None:
-                return v
+    raise ValueError("logprobs形式が想定外")
 
-    raise ValueError("logprobs が見つからない/形式が想定外です。HTTPレスポンスを確認してください。")
-
-def sigmoid(x: float) -> float:
+def sigmoid(x): 
     return 1.0 / (1.0 + math.exp(-x))
 
-# ---- ここから実処理 ----
-resp_withA = to_obj(withA)  # withA が str でも dict でもOK
+def compact(x, sig=12):
+    # Difyの「20桁未満」制約対策：有効数字を絞って float に戻す
+    return float(f"{x:.{sig}g}")
+
+resp_withA = to_obj(withA)
 resp_noA   = to_obj(noA)
 
 avg_withA = extract_avg_logprob(resp_withA)
 avg_noA   = extract_avg_logprob(resp_noA)
 
 delta = avg_withA - avg_noA
-
-k = 3.0  # 感度（まず3、弱ければ上げる）
+k = 3.0
 score = sigmoid(k * delta)  # 0〜1
 
-# 「関連なしは0寄りにしたい」ならこれに置き換えも可
-# score = max(0.0, (score - 0.5) * 2.0)
-
 result = {
-    "answer_relevance": score,
-    "delta": delta,
-    "avg_withA": avg_withA,
-    "avg_noA": avg_noA,
+    "answer_relevance": compact(score, 12),
+    "delta": compact(delta, 12),
+    "avg_withA": compact(avg_withA, 12),
+    "avg_noA": compact(avg_noA, 12),
 }
