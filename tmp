@@ -1,47 +1,7 @@
-import json
-import re
-
-def parse_ranked_contexts_from_files(text: str) -> str:
-    """
-    ルール:
-    - ブロック開始は「/files/」を含む行
-    - ブロックは次の「/files/」行の直前まで
-    - 順番が順位(1位から)で、順位表記は無い
-    - 出力: [{"rank": 1, "content": "<ファイル行含む>\\n<本文>..."}, ...] のJSON文字列
-    """
-    file_line_re = re.compile(r"^.*\/files\/.*$")
-
-    blocks = []
-    buf = None  # None の間は無駄テキスト扱いで捨てる
-
-    for raw_line in text.splitlines():
-        line = raw_line.rstrip("\n")
-
-        if file_line_re.match(line):
-            # 新しいブロック開始
-            if buf is not None:
-                blocks.append("\n".join(buf).strip("\n"))
-            buf = [line.strip()]  # ファイル行を content に含める
-        else:
-            if buf is None:
-                continue
-            buf.append(line)
-
-    if buf is not None:
-        blocks.append("\n".join(buf).strip("\n"))
-
-    results = [{"rank": i + 1, "content": blocks[i]} for i in range(len(blocks))]
-    return json.dumps(results, ensure_ascii=False, indent=2)
-
-# 使い方
-text = """
-無駄なテキスト文
-1位のコンテキストファイル名(/files/aaa)
-コンテキスト本文1
-コンテキスト本文1-2
-2位のコンテキストファイル名(/files/bbb)
-コンテキスト本文2
-"""
-
-json_text = parse_ranked_contexts_from_files(text)
-print(json_text)
+curl -X POST "https://{resource-name}.openai.azure.com/openai/deployments/{deployment-id}/chat/completions?api-version=2024-10-21" \
+  -H "Content-Type: application/json" \
+  -H "api-key: {YOUR_AZURE_OPENAI_KEY}" \
+  -d '{
+    "messages":[{"role":"user","content":"hello"}],
+    "temperature":0
+  }'
