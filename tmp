@@ -1,28 +1,26 @@
 import os
 import time
+import math
 import random
-import numpy as np
 import boto3
 from botocore.exceptions import ClientError
 
-VECTOR_BUCKET = os.environ["VECTOR_BUCKET_NAME"]   # 例: my-vector-bucket
-INDEX_NAME    = os.environ["VECTOR_INDEX_NAME"]    # 例: my-index
-DIM           = int(os.environ.get("VECTOR_DIM", "1536"))  # インデックスの次元に合わせる
+VECTOR_BUCKET = os.environ["VECTOR_BUCKET_NAME"]
+INDEX_NAME    = os.environ["VECTOR_INDEX_NAME"]
+DIM           = int(os.environ.get("VECTOR_DIM", "1536"))
 TOTAL         = int(os.environ.get("TOTAL", "1000"))
-BATCH_SIZE    = 500  # PutVectorsの上限  [oai_citation:3‡AWS Documentation](https://docs.aws.amazon.com/ja_jp/AmazonS3/latest/userguide/s3-vectors-limitations.html)
+BATCH_SIZE    = 500
 
 client = boto3.client("s3vectors")
 
-def make_vector(i: int) -> list[float]:
-    rng = np.random.default_rng(seed=i)
-    v = rng.normal(size=DIM).astype(np.float32)
-    # cosine向けにゼロを避けて正規化（cosineはゼロベクトル不可）  [oai_citation:4‡boto3.amazonaws.com](https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3vectors/client/put_vectors.html)
-    norm = np.linalg.norm(v)
-    if norm == 0:
-        v[0] = np.float32(1.0)
-        norm = np.linalg.norm(v)
-    v = (v / norm).astype(np.float32)
-    return v.tolist()
+def make_vector(seed: int) -> list[float]:
+    rng = random.Random(seed)
+    v = [rng.uniform(-1.0, 1.0) for _ in range(DIM)]
+    norm = math.sqrt(sum(x*x for x in v))
+    if norm == 0.0:
+        v[0] = 1.0
+        norm = 1.0
+    return [float(x / norm) for x in v]  # float32相当でOK（boto3側で数値配列として送る）
 
 def put_with_retry(vectors, max_retry=8):
     for attempt in range(max_retry):
@@ -35,7 +33,6 @@ def put_with_retry(vectors, max_retry=8):
             return
         except ClientError as e:
             code = e.response.get("Error", {}).get("Code", "")
-            # 混雑時/スロットル系はリトライ（ServiceUnavailableの記載あり）  [oai_citation:5‡boto3.amazonaws.com](https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3vectors/client/put_vectors.html)
             if code in ["ServiceUnavailableException", "ThrottlingException", "TooManyRequestsException"]:
                 sleep = min(2 ** attempt, 10) + random.random()
                 time.sleep(sleep)
@@ -46,17 +43,14 @@ def chunks(lst, n):
     for i in range(0, len(lst), n):
         yield lst[i:i+n]
 
-# 1000件生成（key: test_vector1〜test_vector1000）
 all_vectors = []
 for i in range(1, TOTAL + 1):
     all_vectors.append({
         "key": f"test_vector{i}",
-        "data": {"float32": make_vector(i)},  # float32必須  [oai_citation:6‡boto3.amazonaws.com](https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3vectors/client/put_vectors.html)
-        # 必要ならメタデータに元文字列やIDを入れる（サイズ制限に注意）  [oai_citation:7‡AWS Documentation](https://docs.aws.amazon.com/ja_jp/AmazonS3/latest/userguide/s3-vectors-limitations.html)
+        "data": {"float32": make_vector(i)},
         "metadata": {"source": "dummy", "id": i},
     })
 
-# 500件ずつPutVectors（1000件なら2回）
 for batch in chunks(all_vectors, BATCH_SIZE):
     put_with_retry(batch)
 
