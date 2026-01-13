@@ -1,57 +1,51 @@
-import os
-import time
-import math
-import random
-import boto3
-from botocore.exceptions import ClientError
+import json, random
 
-VECTOR_BUCKET = os.environ["VECTOR_BUCKET_NAME"]
-INDEX_NAME    = os.environ["VECTOR_INDEX_NAME"]
-DIM           = int(os.environ.get("VECTOR_DIM", "1536"))
-TOTAL         = int(os.environ.get("TOTAL", "1000"))
-BATCH_SIZE    = 500
+random.seed(42)
 
-client = boto3.client("s3vectors")
+objs = [
+  "太陽","月","地球","火星","金星","水星","木星","土星","天王星","海王星",
+  "冥王星","銀河","天の川銀河","アンドロメダ銀河","星雲","超新星残骸","ブラックホール",
+  "中性子星","白色矮星","赤色巨星","系外惑星","小惑星","彗星","流星群","オーロラ",
+  "宇宙線","暗黒物質","ダークエネルギー","重力波","宇宙背景放射","惑星状星雲",
+  "星団","衛星","人工衛星","宇宙望遠鏡","探査機","ロケット","宇宙飛行士","国際宇宙ステーション",
+  "軌道","ラグランジュ点","太陽風","磁気圏","星間物質","星形成領域","ガンマ線バースト",
+  "クエーサー","パルサー","リング状惑星","氷衛星"
+]
 
-def make_vector(seed: int) -> list[float]:
-    rng = random.Random(seed)
-    v = [rng.uniform(-1.0, 1.0) for _ in range(DIM)]
-    norm = math.sqrt(sum(x*x for x in v))
-    if norm == 0.0:
-        v[0] = 1.0
-        norm = 1.0
-    return [float(x / norm) for x in v]  # float32相当でOK（boto3側で数値配列として送る）
+adjs = [
+  "はるか彼方で","静かに","ゆっくりと","猛烈に","規則正しく","不規則に","淡く","眩しく",
+  "極低温で","高密度に","巨大なスケールで","微細な揺らぎとして","秒速で","数億年かけて",
+  "光速に近い速さで","重力に引かれて","潮汐力で","磁場に導かれて","真空の中で",
+  "薄いガスに包まれて","ちりをまとって","氷に覆われて","プラズマとして","放射を伴って",
+  "電波で","赤外線で","X線で","可視光で","重力波として","ニュートリノとともに"
+]
 
-def put_with_retry(vectors, max_retry=8):
-    for attempt in range(max_retry):
-        try:
-            client.put_vectors(
-                vectorBucketName=VECTOR_BUCKET,
-                indexName=INDEX_NAME,
-                vectors=vectors,
-            )
-            return
-        except ClientError as e:
-            code = e.response.get("Error", {}).get("Code", "")
-            if code in ["ServiceUnavailableException", "ThrottlingException", "TooManyRequestsException"]:
-                sleep = min(2 ** attempt, 10) + random.random()
-                time.sleep(sleep)
-                continue
-            raise
+verbs = [
+  "回っている","輝いている","膨張している","冷えている","誕生している","衝突している",
+  "引き裂かれている","合体している","噴き出している","観測されている","隠れている",
+  "加速している","減速している","ゆがめている","照らしている","影を落としている",
+  "粒子を放っている","時間をゆっくりにしている","軌道を乱している","新しい謎を残している"
+]
 
-def chunks(lst, n):
-    for i in range(0, len(lst), n):
-        yield lst[i:i+n]
+tails = [
+  "という仮説がある","と考えられている","が研究を進める鍵になる","は観測技術の進歩で見えてきた",
+  "はまだ未解明だ","は人類の好奇心を刺激する","は宇宙の歴史を物語る","は私たちの常識を揺さぶる",
+  "は次の探査目標になりうる","はデータ解析で正体に迫れる","は理論と観測の接点だ","は今も議論が続く"
+]
 
-all_vectors = []
-for i in range(1, TOTAL + 1):
-    all_vectors.append({
-        "key": f"test_vector{i}",
-        "data": {"float32": make_vector(i)},
-        "metadata": {"source": "dummy", "id": i},
-    })
+def make_sentence():
+  o = random.choice(objs)
+  a = random.choice(adjs)
+  v = random.choice(verbs)
+  t = random.choice(tails)
+  return f"{o}は{a}{v}{t}。"
 
-for batch in chunks(all_vectors, BATCH_SIZE):
-    put_with_retry(batch)
+sentences = []
+seen = set()
+while len(sentences) < 1000:
+  s = make_sentence()
+  if s not in seen:
+    seen.add(s)
+    sentences.append(s)
 
-print("Done.")
+print(json.dumps(sentences, ensure_ascii=False, indent=2))
