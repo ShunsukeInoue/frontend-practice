@@ -1,31 +1,49 @@
-「DifyのWorkflowをAPIで実行したときに504 Gateway Timeoutになる原因と対策は？」
+flowchart TB
+  %% Actors / Systems
+  subgraph ExaSide["exa（規程・ナレッジ管理）"]
+    ExaDocs["規程ドキュメント更新\n（追加/改定/削除）"]
+    ExaIndex["ナレッジ再生成/再インデックス\n（RAG用）"]
+    ExaAccessAPI["規程アクセス可否API\n返却: regulation_id, regulation_name, usable"]
+    ExaChatAPI["チャットAPI\nreq: account_info + chat_text"]
+  end
 
-⸻
+  subgraph LocalSide["こちら側（AIユーモ / なんでも案内AI）"]
+    Admin["管理者（運用担当）"]
+    AdminUI["管理画面\n（規程メタ情報管理）"]
+    LocalDB["ローカルDB\n規程メタ情報\n- regulation_id\n- exa_canonical_name\n- category / orders\n- local_status(緊急停止)\n- summary/importance..."]
+    SyncJob["同期処理\n（手動 or バッチ）"]
+    AppUI["なんでも案内AI UI\n（規程一覧表示/選択）"]
+    YumoBackend["AIユーモ Backend\n（ユーザー情報・UI用API・チャット中継）"]
+  end
 
-1) キーワード検索では引っかかるが、セマンティック検索では引っかからなそうな文章（10個）
-	1.	「Dify Workflow API 504 Gateway Timeout 原因 対策」←キーワードだけを並べただけのメモ。
-	2.	「“504 Gateway Timeout”という文字列がログに出たら、DifyのWorkflowをAPIで叩いたときのやつだと思う、たぶん。」
-	3.	「原因と対策：Dify／Workflow／API／504／Gateway Timeout（詳細は後で書く）」
-	4.	「DifyのWorkflowをAPIで実行したときに504 Gateway Timeoutになる“原因と対策”のページタイトル案を考える。」（内容がない）
-	5.	「Gateway Timeout 504 の原因、Dify の Workflow、API 実行、対策、原因、対策…（SEO用の下書き）」
-	6.	「Dify Workflow API 504 Gateway Timeout：これは“仕様”かもしれない、原因と対策は不明。」（情報価値が薄い）
-	7.	「会議議事録：Dify、Workflow、API、504、Gateway Timeout、原因、対策、担当者はA。」（中身がない）
-	8.	「“DifyのWorkflowをAPIで実行したときに504 Gateway Timeoutになる原因と対策”という文章を例文として使う。」（引用してるだけ）
-	9.	「APIでWorkflowを叩く、Difyで504、Gateway Timeout、原因と対策——という単語を含むテキスト。」（中身がない）
-	10.	「Dify の Workflow を API 実行 → 504 Gateway Timeout（原因/対策は別資料参照）」（別資料依存）
+  subgraph Users["利用者"]
+    User["ログインユーザー"]
+  end
 
-⸻
+  %% 1) Exa updates regulations
+  ExaDocs --> ExaIndex
 
-2) セマンティック検索では引っかかるが、キーワード検索では引っかからなそうな文章（10個）
+  %% 2) Admin syncs metadata base list
+  Admin --> AdminUI
+  AdminUI -->|同期ボタン| SyncJob
+  SyncJob -->|GET| ExaAccessAPI
+  ExaAccessAPI -->|規程id/名/usable| SyncJob
+  SyncJob -->|upsert\n規程名差分更新など| LocalDB
 
-※下は 質問文の主要キーワード（Dify / Workflow / API / 504 / Gateway Timeout / 原因 / 対策）をなるべく使わず、意味だけ寄せています。
-	1.	「外部から処理フローを呼び出すと、応答が返る前に上流の通信待ち時間を超えて失敗することがある。実行時間を短くするか、待ち時間設定を見直す必要がある。」
-	2.	「長い処理を同期で返そうとしていると、途中で接続が切れて“待ちすぎ”扱いになる。結果は後で取得する方式に変えるのが安全。」
-	3.	「裏側でモデル呼び出しやデータ取得が連鎖して遅くなると、入口側が先に諦めてエラーになる。重い工程を分割して段階的に実行する。」
-	4.	「同時実行が増えるとキューが詰まり、開始までに時間がかかって失敗率が上がる。並列数制限とリトライ設計が必要。」
-	5.	「ストリーミングで逐次返すと“反応がない時間”を減らせるので、待ち時間超過の回避に効く場合がある。」
-	6.	「プロキシ／ロードバランサ側の待機上限に引っかかっている可能性がある。アプリではなく中継設定の上限値がボトルネックになることがある。」
-	7.	「処理がI/O待ち（外部通信待ち）に偏っているなら、接続先の遅延・DNS・TLS・回線なども疑う。アプリ改善だけでは直らないケースがある。」
-	8.	「レスポンスを一度に返す設計だと大きな出力で遅くなる。途中経過を返す、もしくは結果格納→参照型にするのがよい。」
-	9.	「失敗時に同じ入力で再実行しても再現しないなら、混雑や一時的な遅延が原因のことが多い。監視で遅延のピークを押さえる。」
-	10.	「入口の待機時間、バックエンドの最大実行時間、外部サービスの応答時間の“最短”が実質の制限になる。どこが最も短いかを特定して調整する。」
+  %% 3) User opens app and sees accessible list
+  User --> AppUI
+  AppUI -->|一覧取得| YumoBackend
+  YumoBackend -->|GET| ExaAccessAPI
+  ExaAccessAPI -->|規程id/名/usable| YumoBackend
+  YumoBackend -->|JOIN\nexa結果 × LocalDB| LocalDB
+  YumoBackend -->|カテゴリでセクショニング\n並び順適用\nfinal_usable = usable AND local_status==enabled| AppUI
+
+  %% 4) User selects regulation and chats
+  AppUI -->|規程選択| YumoBackend
+  YumoBackend -->|チャット送信\n先頭に注入:\n{exa_canonical_name}に関する質問です。| ExaChatAPI
+  ExaChatAPI -->|RAG回答| YumoBackend
+  YumoBackend --> AppUI
+
+  %% Notes / edge cases
+  LocalDB -.緊急停止.-> YumoBackend
+  ExaIndex -.更新遅延がある場合.-> ExaChatAPI
