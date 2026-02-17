@@ -1,330 +1,40 @@
-EPIC-01：DB/バックエンド基盤
-
-NANDAI-01 DBマイグレーション作成（categories/topics）
-
-目的：仕様書のDB項目を永続化できる状態にする
-内容
-	•	categories テーブル作成
-	•	category_id(PK, auto increment)
-	•	category(String, unique)
-	•	category_order(Int, null可 ※その他のみnull)
-	•	created_at/updated_at
-	•	topics テーブル作成
-	•	topics_on_groups_id(String, unique)
-	•	display_name(String)
-	•	category_id(FK)
-	•	topics_order_in_category(Int)
-	•	is_visible(Bool) ※exa同期
-	•	is_visible_override(Bool) ※ローカル優先（編集可）
-	•	discription(String) ※綴り仕様通りならdiscription、直すならdescription（要注意）
-	•	use_case(String)
-	•	topic_support_info(String)
-	•	note(String)
-	•	created_at/updated_at/last_synced_at
-	•	制約/Index
-	•	unique(topics_on_groups_id)
-	•	unique(category_id, topics_order_in_category)
-受け入れ条件
-	•	マイグレーション適用/ロールバックが可能
-	•	同カテゴリ内で同じ順序を登録するとエラーになる
-
-⸻
-
-NANDAI-02 初期カテゴリ投入（ローン/保険/デジタルチャンネル/その他）
-
-内容
-	•	seed or 初期データ投入処理を実装
-	•	「その他」は category_order = null で登録
-受け入れ条件
-	•	DB初期化後にカテゴリが揃っている
-	•	「その他」のcategory_orderがnull
-
-⸻
-
-NANDAI-03 ドメインモデル/Repository（topics/categories）
-
-内容
-	•	ORMモデル定義
-	•	topics/categories のCRUD用Repository
-受け入れ条件
-	•	API実装に必要な参照/更新がRepository経由で可能
-
-⸻
-
-EPIC-02：exa連携（同期/チャット）
-
-NANDAI-04 exa 個別RAG情報取得API（ExaAPI1）クライアント実装
-
-内容
-	•	ExaAPI1呼び出し（headers: apikey, content-type）
-	•	requestパラメータ：transaction_id, email, user_name, department
-	•	timeout/retry、エラー整形
-受け入れ条件
-	•	モック/実環境で 200時にレスポンスをパースできる
-	•	エラー時にアプリ側へ原因が返る
-
-⸻
-
-NANDAI-05 同期API実装：POST /admin/topics/sync
-
-内容
-	•	管理画面の「更新」ボタンから呼ばれるAPI
-	•	ExaAPI1 → レスポンスの topics を upsert
-	•	display_name, is_visible, discription/use_case/topic_support_info はexaの内容で更新
-	•	last_synced_at 更新
-	•	新規topic追加時の初期値
-	•	category_id：その他
-	•	topics_order_in_category：その他カテゴリ内の最大 + 10
-	•	is_visible_override：true（推奨。exa可視なら表示できる状態から始める）
-	•	同期結果（追加件数/更新件数/総件数/同期時刻）をレスポンスで返す
-受け入れ条件
-	•	同期後、DBのtopicsがexaと一致する（編集項目は保持される）
-	•	新規topicが「その他」に入り順序が10刻みで採番される
-
-⸻
-
-NANDAI-06 exa チャットAPI（ExaAPI2）クライアント実装
-
-内容
-	•	ExaAPI2呼び出し（headers: apikey）
-	•	requestパラメータ：transaction_id, conv_id, email, user_name, department, messages
-	•	エラー整形
-受け入れ条件
-	•	正常応答をパースできる
-
-⸻
-
-NANDAI-07 conv_id生成ロジック（バックエンド）
-
-内容
-	•	POST /app/chat 初回呼び出し時に conv_id を生成して返却
-	•	以降はクライアントから渡された conv_id を利用
-	•	形式：UUID推奨
-受け入れ条件
-	•	conv_idが必ずバックエンド起点で生成される
-	•	フロントはconv_idを保持して次回以降に送れる
-
-⸻
-
-NANDAI-08 チャット中継API：POST /app/chat
-
-内容
-	•	入力：topics_on_groups_id, user_message, (optional) conv_id
-	•	DBから display_name を取得し、先頭に注入
-"{display_name}に関する質問です。" + ユーザー入力
-	•	ExaAPI2に転送して結果返却
-	•	ユーザー入力の {} をエスケープ（推奨。事故防止）
-受け入れ条件
-	•	規程選択に応じた display_name が必ず先頭に入る
-	•	conv_idが返却される（初回生成時）
-	•	エラー時にフロントへ適切なメッセージが返る
-
-⸻
-
-EPIC-03：管理画面API
-
-NANDAI-09 管理：トピック一覧API GET /admin/topics
-
-内容
-	•	topics + category情報を一覧返却
-	•	並び順：category_order（nullは最後）→ topics_order_in_category
-受け入れ条件
-	•	管理画面が必要な項目を取得できる
-
-⸻
-
-NANDAI-10 管理：トピック更新API PUT /admin/topics/{topics_on_groups_id}
-
-内容
-	•	更新可能：category_id, topics_order_in_category, is_visible_override, note
-	•	仕様反映：is_visible == true の時のみ is_visible_override 更新可
-	•	同カテゴリ内 order 重複チェック、10刻みチェック
-受け入れ条件
-	•	exa由来項目は更新不可
-	•	is_visible=false のtopicに対してoverride更新が拒否される
-
-⸻
-
-NANDAI-11 管理：カテゴリCRUD API
-
-内容
-	•	GET /admin/categories
-	•	POST /admin/categories（orderデフォルト：最大+10）
-	•	PUT /admin/categories/{id}
-	•	DELETE /admin/categories/{id}
-※削除は「紐づくtopicがある場合は拒否」を推奨
-受け入れ条件
-	•	カテゴリを追加/更新できる
-	•	「その他」のcategory_orderはnull固定（更新禁止 or UIで不可）
-
-⸻
-
-EPIC-04：利用者画面API
-
-NANDAI-12 利用者：トピック一覧API GET /app/topics
-
-内容
-	•	categories + topics をセクション形式で返す（フロントが組みやすい形）
-	•	最終表示可否：final_visible = is_visible && is_visible_override
-	•	ツールチップ用に discription/use_case/topic_support_info を含める
-受け入れ条件
-	•	表示に必要な全情報が返る
-	•	final_visibleが計算済みで返る
-
-⸻
-
-EPIC-05：品質
-
-NANDAI-13 ログ整備（同期/チャット）
-
-内容
-	•	同期API：追加/更新/総数/所要時間/失敗理由をログ
-	•	チャットAPI：request_id/conv_id/topic_id/エラーをログ
-受け入れ条件
-	•	障害時にログから原因が追える
-
-⸻
-
-NANDAI-14 単体テスト（優先度高）
-
-内容
-	•	同期upsertのテスト（新規/更新）
-	•	topics_order_in_categoryの重複拒否
-	•	is_visible=false時のoverride更新拒否
-	•	final_visible計算
-受け入れ条件
-	•	CIで自動実行できる（最低限ローカルでもOK）
-
-⸻
-
-✅ フロントエンド（FE）チケット
-
-EPIC-03：管理画面
-
-NANDAI-21 管理画面：ルーティング/レイアウト追加
-
-内容
-	•	/admin/nandemo-ai のルート追加
-	•	管理者メニューに追加
-受け入れ条件
-	•	管理画面に遷移できる
-
-⸻
-
-NANDAI-22 管理画面：トピック一覧テーブル実装
-
-内容
-	•	一覧表示（カテゴリ/順序/表示名/可視状態/override/同期日時 等）
-	•	ソート：category_order→topics_order_in_category
-	•	更新（同期）ボタン配置
-受け入れ条件
-	•	GET /admin/topics を表示できる
-
-⸻
-
-NANDAI-23 管理画面：同期ボタン（更新）実装
-
-内容
-	•	POST /admin/topics/sync 呼び出し
-	•	ローディング/多重押下防止
-	•	成功トースト（件数/時刻）
-	•	失敗時エラー表示
-受け入れ条件
-	•	押下で同期が走り一覧が更新される
-
-⸻
-
-NANDAI-24 管理画面：トピック編集（モーダル）
-
-内容
-	•	編集項目：category、topics_order_in_category、is_visible_override、note
-	•	is_visible=false の場合、overrideトグルをdisabled＋説明文表示
-	•	保存で PUT /admin/topics/{topics_on_groups_id}
-受け入れ条件
-	•	編集→保存→一覧へ反映される
-
-⸻
-
-NANDAI-25 管理画面：カテゴリ管理（一覧/CRUD）
-
-内容
-	•	カテゴリ一覧（category/order）
-	•	追加/編集/削除
-	•	「その他」は order編集不可、削除不可（推奨）
-受け入れ条件
-	•	カテゴリの追加/編集ができる
-
-⸻
-
-EPIC-04：利用者画面（なんでも案内AI）
-
-NANDAI-31 トピック選択画面：カテゴリ別セクション表示
-
-内容
-	•	GET /app/topics を呼んで表示
-	•	category_order null（その他）は最後
-	•	final_visible=false は非表示（or グレーアウトは要件が無いので非表示推奨）
-受け入れ条件
-	•	アクセス可能topics一覧がカテゴリ別に表示される
-
-⸻
-
-NANDAI-32 トピック選択画面：ツールチップ実装
-
-内容
-	•	iアイコン or hoverでツールチップ表示
-	•	表示内容：description / use_case / topic_support_info（空なら非表示）
-受け入れ条件
-	•	hoverで情報が確認できる
-
-⸻
-
-NANDAI-33 チャット画面：会話UI実装
-
-内容
-	•	メッセージ一覧、入力、送信、ローディング
-	•	topic選択状態を保持して表示（ヘッダに選択topic名表示など）
-受け入れ条件
-	•	画面上で送受信ができる
-
-⸻
-
-NANDAI-34 チャット送信：POST /app/chat 連携（conv_id保持）
-
-内容
-	•	初回送信：conv_idなしで送信→レスポンスのconv_id保存
-	•	2回目以降：同conv_idで送信
-	•	エラー表示/リトライ
-受け入れ条件
-	•	conv_idが継続され会話が続く
-
-⸻
-
-EPIC-05：品質（FE）
-
-NANDAI-41 FEエラーハンドリング/共通APIクライアント整備
-
-内容
-	•	API失敗時の共通処理（トースト/ダイアログ）
-	•	401/403の扱い（管理画面）
-受け入れ条件
-	•	失敗時にユーザーが行動できる表示になる
-
-⸻
-
-追加：Backlogの「親子構造」案
-	•	親課題：EPIC-01〜05
-	•	子課題：NANDAI-01〜41 を紐付け
-	•	依存関係メモ
-	•	FE管理画面（NANDAI-22/23/24）は BE管理API（NANDAI-05/09/10/11）に依存
-	•	FE利用者画面（NANDAI-31〜34）は BE利用者API（NANDAI-12/08/07）に依存
-
-⸻
-
-このままBacklogに貼るなら、次に
-	•	担当（FE/BE）
-	•	優先度（Must/Should/Could）
-	•	見積（S/M/L）
-も付けられる。
-
-もし「タスク粒度が大きすぎる／細かすぎる」感覚があれば、あなたのチーム規模に合わせて分割調整するよ。
+<div class="space-y-1">
+  <label class="block text-sm font-medium">数量</label>
+
+  <input
+    id="qty"
+    type="text"
+    inputmode="numeric"
+    autocomplete="off"
+    placeholder="0以上の整数"
+    class="w-full rounded-md border px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+  />
+
+  <p id="qty-error" class="hidden text-sm text-red-600">
+    0以上の整数のみ入力できます
+  </p>
+</div>
+
+<script>
+  const el = document.getElementById("qty");
+  const err = document.getElementById("qty-error");
+
+  // 0以上の整数だけ許可（空は許可するならこのまま）
+  const isValid = (v) => v === "" || /^[0-9]+$/.test(v);
+
+  el.addEventListener("beforeinput", (e) => {
+    // 追加される文字（貼り付け含む）
+    const next = el.value.slice(0, el.selectionStart) + (e.data ?? "") + el.value.slice(el.selectionEnd);
+    if (!isValid(next)) e.preventDefault();
+  });
+
+  el.addEventListener("input", () => {
+    const ok = isValid(el.value);
+
+    el.classList.toggle("border-red-500", !ok);
+    el.classList.toggle("focus:ring-red-500", !ok);
+    el.setAttribute("aria-invalid", String(!ok));
+
+    err.classList.toggle("hidden", ok);
+  });
+</script>
